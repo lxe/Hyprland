@@ -1425,7 +1425,7 @@ void CInputManager::onKeyboardKey(const IKeyboard::SKeyEvent& event, SP<IKeyboar
     const auto EMAP = std::unordered_map<std::string, std::any>{{"keyboard", pKeyboard}, {"event", event}};
     EMIT_HOOK_EVENT_CANCELLABLE("keyPress", EMAP);
 
-    bool passEvent = !PROTO::inputCapture->isCaptured() && (DISALLOWACTION || g_pKeybindManager->onKeyEvent(event, pKeyboard));
+    bool passEvent = (DISALLOWACTION || g_pKeybindManager->onKeyEvent(event, pKeyboard)) && !PROTO::inputCapture->isCaptured();
 
     auto e = std::any_cast<IKeyboard::SKeyEvent>(event);
 
