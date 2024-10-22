@@ -940,6 +940,8 @@ void CPointerManager::attachPointer(SP<IPointer> pointer) {
         g_pSeatManager->m_isPointerFrameSkipped = shouldSkip;
         if (!g_pSeatManager->m_isPointerFrameSkipped)
             g_pSeatManager->sendPointerFrame();
+        
+        g_pInputManager->onMouseFrame();
     });
 
     listener->swipeBegin = pointer->m_pointerEvents.swipeBegin.listen([](const IPointer::SSwipeBeginEvent& event) {
