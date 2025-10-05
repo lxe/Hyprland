@@ -2,7 +2,6 @@
 
 #include "Compositor.hpp"
 #include "debug/Log.hpp"
-#include "helpers/Eis.hpp"
 #include "hyprland-input-capture-v1.hpp"
 #include "managers/HookSystemManager.hpp"
 #include "managers/permissions/DynamicPermissionManager.hpp"
@@ -15,17 +14,16 @@
 #include <glaze/core/context.hpp>
 #include <glaze/util/parse.hpp>
 #include <hyprutils/memory/SharedPtr.hpp>
-#include <iterator>
 #include <libeis.h>
 #include <optional>
 #include <string>
 
 static int eisCounter = 0;
 
-CInputCaptureResource::CInputCaptureResource(SP<CHyprlandInputCaptureV1> resource_, std::string handle) : sessionId(handle), m_resource(resource_) {
+CInputCaptureResource::CInputCaptureResource(SP<CHyprlandInputCaptureV1> resource_, std::string handle) : m_sessionId(handle), m_resource(resource_) {
     if UNLIKELY (!good())
         return;
-    Debug::log(LOG, "[input-capture]({}) new session", sessionId.c_str());
+    Debug::log(LOG, "[input-capture]({}) new session", m_sessionId.c_str());
 
     m_resource->setOnDestroy([this](CHyprlandInputCaptureV1* r) { PROTO::inputCapture->destroyResource(this); }); //Remove & free this session
 
@@ -36,27 +34,28 @@ CInputCaptureResource::CInputCaptureResource(SP<CHyprlandInputCaptureV1> resourc
     m_resource->setRelease([this](CHyprlandInputCaptureV1* r, uint32_t activationId, double x, double y) { onRelease(activationId, x, y); });
     m_resource->setClearBarriers([this](CHyprlandInputCaptureV1* r) { onClearBarriers(); });
 
-    eis = makeUnique<CEmulatedInputServer>("eis-" + std::to_string(eisCounter++));
+    m_eis = makeUnique<CEis>("eis-" + std::to_string(eisCounter++));
 
-    m_resource->sendEisFd(eis->getFileDescriptor());
+    m_resource->sendEisFd(m_eis->getFileDescriptor());
 
-    monitorCallback = g_pHookSystem->hookDynamic("monitorLayoutChanged", [this](void* self, SCallbackInfo& info, std::any param) {
+    m_monitorCallback = g_pHookSystem->hookDynamic("monitorLayoutChanged", [this](void* self, SCallbackInfo& info, std::any param) {
         onClearBarriers();
         disable();
-        eis->resetPointer();
+        m_eis->resetPointer();
     });
 }
 
 CInputCaptureResource::~CInputCaptureResource() {
-    if (status == ACTIVATED)
+    if (m_status == CLIENT_STATUS_ACTIVATED)
         PROTO::inputCapture->forceRelease();
 
-    Debug::log(LOG, "[input-capture]({}) session destroyed", sessionId.c_str());
-    g_pHookSystem->unhook(monitorCallback);
+    Debug::log(LOG, "[input-capture]({}) session destroyed", m_sessionId.c_str());
+    g_pHookSystem->unhook(m_monitorCallback);
+    PROTO::inputCapture->clearBarriers(m_sessionId);
 };
 
 bool CInputCaptureResource::enabled() {
-	return status == ENABLED;
+    return m_status == CLIENT_STATUS_ENABLED;
 }
 
 bool CInputCaptureResource::good() {
@@ -64,8 +63,8 @@ bool CInputCaptureResource::good() {
 }
 
 void CInputCaptureResource::onEnable() {
-    Debug::log(LOG, "[input-capture]({}) session enabled", sessionId.c_str());
-    status = ENABLED;
+    Debug::log(LOG, "[input-capture]({}) session enabled", m_sessionId.c_str());
+    m_status = CLIENT_STATUS_ENABLED;
 }
 
 enum eValidResult : uint8_t {
@@ -134,14 +133,14 @@ void CInputCaptureResource::onAddBarrier(uint32_t zoneSet, uint32_t id, uint32_t
 
     if (!valid) {
         m_resource->error(HYPRLAND_INPUT_CAPTURE_V1_ERROR_INVALID_BARRIER, "The barrier id " + std::to_string(id) + " is invalid");
-        Debug::log(LOG, "[input-capture]({}) Barrier {} is invalid [{}, {}], [{}, {}]", sessionId.c_str(), id, x1, y1, x2, y2);
+        Debug::log(LOG, "[input-capture]({}) Barrier {} is invalid [{}, {}], [{}, {}]", m_sessionId.c_str(), id, x1, y1, x2, y2);
 
         return;
     }
 
-    Debug::log(LOG, "[input-capture]({}) Barrier {} [{}, {}], [{}, {}] added", sessionId.c_str(), id, x1, y1, x2, y2);
+    Debug::log(LOG, "[input-capture]({}) Barrier {} [{}, {}], [{}, {}] added", m_sessionId.c_str(), id, x1, y1, x2, y2);
 
-    PROTO::inputCapture->addBarrier({.sessionId = sessionId, .id = id, .x1 = x1, .y1 = y1, .x2 = x2, .y2 = y2});
+    PROTO::inputCapture->addBarrier({.sessionId = m_sessionId, .id = id, .x1 = x1, .y1 = y1, .x2 = x2, .y2 = y2});
 }
 
 void CInputCaptureResource::onDisable() {
@@ -149,8 +148,8 @@ void CInputCaptureResource::onDisable() {
 }
 
 void CInputCaptureResource::onRelease(uint32_t activationId_, double x, double y) {
-    if (activationId_ != activationId) { // If id is invalid we still want to release the mouse to avoid any issue
-        Debug::log(WARN, "[input-capture]({}) Invalid activation id {} expected {}", sessionId.c_str(), activationId_, activationId);
+    if (activationId_ != m_activationId) { // If id is invalid we still want to release the mouse to avoid any issue
+        Debug::log(WARN, "[input-capture]({}) Invalid activation id {} expected {}", m_sessionId.c_str(), activationId_, m_activationId);
     }
 
     deactivate();
@@ -161,63 +160,63 @@ void CInputCaptureResource::onRelease(uint32_t activationId_, double x, double y
 }
 
 void CInputCaptureResource::onClearBarriers() {
-    PROTO::inputCapture->clearBarriers(sessionId);
+    PROTO::inputCapture->clearBarriers(m_sessionId);
 }
 
 bool CInputCaptureResource::activate(double x, double y, uint32_t borderId) {
-    if (status != ENABLED)
+    if (m_status != CLIENT_STATUS_ENABLED)
         return false;
 
     const auto PERM = g_pDynamicPermissionManager->clientPermissionMode(m_resource->client(), PERMISSION_TYPE_INPUT_CAPTURE);
     if (PERM != PERMISSION_RULE_ALLOW_MODE_ALLOW)
         return false;
 
-    activationId += 5;
-    status = ACTIVATED;
-    Debug::log(LOG, "[input-capture]({}) Input captured, activationId: {}, borderId: {}, x: {}, y: {}", sessionId.c_str(), activationId, borderId, x, y);
-    eis->startEmulating(activationId);
+    m_activationId += 5;
+    m_status = CLIENT_STATUS_ACTIVATED;
+    Debug::log(LOG, "[input-capture]({}) Input captured, activationId: {}, borderId: {}, x: {}, y: {}", m_sessionId.c_str(), m_activationId, borderId, x, y);
+    m_eis->startEmulating(m_activationId);
     g_pHyprRenderer->ensureCursorRenderingMode();
-    m_resource->sendActivated(activationId, x, y, borderId);
+    m_resource->sendActivated(m_activationId, x, y, borderId);
 
     return true;
 }
 
 void CInputCaptureResource::deactivate() {
-    if (status != ACTIVATED)
+    if (m_status != CLIENT_STATUS_ACTIVATED)
         return;
 
-    Debug::log(LOG, "[input-capture]({}) Input released", sessionId.c_str());
-    status = ENABLED;
-    eis->stopEmulating();
+    Debug::log(LOG, "[input-capture]({}) Input released", m_sessionId.c_str());
+    m_status = CLIENT_STATUS_ENABLED;
+    m_eis->stopEmulating();
     PROTO::inputCapture->release();
 
-    m_resource->sendDeactivated(activationId);
+    m_resource->sendDeactivated(m_activationId);
 }
 
 void CInputCaptureResource::disable() {
-    if (status == ACTIVATED)
+    if (m_status == CLIENT_STATUS_ACTIVATED)
         deactivate();
-    if (status != ENABLED)
+    if (m_status != CLIENT_STATUS_ENABLED)
         return;
-    status = CREATED;
+    m_status = CLIENT_STATUS_CREATED;
 
     m_resource->sendDisabled();
 }
 
 void CInputCaptureResource::motion(double dx, double dy) {
-    eis->sendMotion(dx, dy);
+    m_eis->sendMotion(dx, dy);
 }
 
 void CInputCaptureResource::key(uint32_t key, bool pressed) {
-    eis->sendKey(key, pressed);
+    m_eis->sendKey(key, pressed);
 }
 
 void CInputCaptureResource::modifiers(uint32_t modsDepressed, uint32_t modsLatched, uint32_t modsLocked, uint32_t group) {
-    eis->sendModifiers(modsDepressed, modsLatched, modsLocked, group);
+    m_eis->sendModifiers(modsDepressed, modsLatched, modsLocked, group);
 }
 
 void CInputCaptureResource::button(uint32_t button, bool pressed) {
-    eis->sendButton(button, pressed);
+    m_eis->sendButton(button, pressed);
 }
 
 void CInputCaptureResource::axis(bool axis, double value) {
@@ -229,7 +228,7 @@ void CInputCaptureResource::axis(bool axis, double value) {
     else
         y = value;
 
-    eis->sendScrollDelta(x, y);
+    m_eis->sendScrollDelta(x, y);
 }
 
 void CInputCaptureResource::axisValue120(bool axis, int32_t value120) {
@@ -241,15 +240,15 @@ void CInputCaptureResource::axisValue120(bool axis, int32_t value120) {
     else
         y = value120;
 
-    eis->sendScrollDiscrete(x, y);
+    m_eis->sendScrollDiscrete(x, y);
 }
 
 void CInputCaptureResource::axisStop(bool axis) {
-    eis->sendScrollStop(axis, !axis);
+    m_eis->sendScrollStop(axis, !axis);
 }
 
 void CInputCaptureResource::frame() {
-    eis->sendPointerFrame();
+    m_eis->sendPointerFrame();
 }
 
 static bool isLineIntersect(double p0X, double p0Y, double p1X, double p1Y, double p2X, double p2Y, double p3X, double p3Y) {
@@ -269,11 +268,11 @@ static bool testCollision(SBarrier barrier, double px, double py, double nx, dou
 
 std::optional<SBarrier> CInputCaptureProtocol::isColliding(double px, double py, double nx, double ny) {
     for (const auto& barrier : barriers) {
-		auto session = getSession(barrier.sessionId);
-		if(!session.has_value())
-			continue;
-		if(!session.value()->enabled())
-			continue;
+        auto session = getSession(barrier.sessionId);
+        if (!session.has_value())
+            continue;
+        if (!session.value()->enabled())
+            continue;
 
         if (testCollision(barrier, px, py, nx, ny))
             return std::optional(barrier);
@@ -307,9 +306,7 @@ void CInputCaptureProtocol::onCreateSession(CHyprlandInputCaptureManagerV1* pMgr
 }
 
 void CInputCaptureProtocol::destroyResource(CInputCaptureResource* resource) {
-    Debug::log(LOG, "Destroying resource {}", resource->sessionId);
-    clearBarriers(resource->sessionId);
-    std::erase_if(m_Sessions, [resource](const auto& other) { return other->sessionId == resource->sessionId; });
+    std::erase_if(m_Sessions, [resource](const auto& other) { return other->m_sessionId == resource->m_sessionId; });
 }
 
 bool CInputCaptureProtocol::isCaptured() {
@@ -317,8 +314,9 @@ bool CInputCaptureProtocol::isCaptured() {
 }
 
 void CInputCaptureProtocol::updateKeymap() {
-    for (auto& session : m_Sessions)
+    for (auto& session : m_Sessions) {
         session->updateKeymap();
+    }
 }
 
 void CInputCaptureProtocol::motion(const Vector2D& absolutePosition, const Vector2D& delta) {
@@ -329,9 +327,9 @@ void CInputCaptureProtocol::motion(const Vector2D& absolutePosition, const Vecto
     if (matched.has_value()) {
         auto session = getSession(matched->sessionId);
         if (!session.has_value()) {
-                LOGM(ERR, "Cannot find session {} for triggering barrier {}", matched.value().id, matched.value().sessionId);
-                return;
-            }
+            LOGM(ERR, "Cannot find session {} for triggering barrier {}", matched.value().id, matched.value().sessionId);
+            return;
+        }
         if (session.value()->activate(x, y, matched.value().id))
             active = session.value();
     }
@@ -341,12 +339,11 @@ void CInputCaptureProtocol::motion(const Vector2D& absolutePosition, const Vecto
 }
 
 std::optional<SP<CInputCaptureResource>> CInputCaptureProtocol::getSession(std::string sessionId) {
-    auto result = std::ranges::find_if(m_Sessions, [sessionId](SP<CInputCaptureResource> elem) { return sessionId == elem->sessionId; });
-    if (result == m_Sessions.end()) {
+    auto result = std::ranges::find_if(m_Sessions, [sessionId](SP<CInputCaptureResource> elem) { return sessionId == elem->m_sessionId; });
+    if (result == m_Sessions.end())
         return std::nullopt;
-    }
 
-	return std::optional(*result);
+    return std::optional(*result);
 }
 
 void CInputCaptureProtocol::addBarrier(SBarrier barrier) {
@@ -406,5 +403,5 @@ void CInputCaptureProtocol::frame() {
 
 void CInputCaptureResource::updateKeymap() {
     Debug::log(LOG, "[input-capture] Got new keymap, reseting keyboard");
-    eis->resetKeyboard();
+    m_eis->resetKeyboard();
 }

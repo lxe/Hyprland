@@ -1,6 +1,6 @@
 #pragma once
 
-#include "helpers/Eis.hpp"
+#include "managers/input/Eis.hpp"
 #include "helpers/memory/Memory.hpp"
 #include "hyprland-input-capture-v1.hpp"
 #include "../protocols/WaylandProtocol.hpp"
@@ -10,16 +10,19 @@
 #include <wayland-server.h>
 
 enum eClientStatus : uint8_t {
-    CREATED,   //Is ready to be activated
-    ENABLED,   //Is ready for receiving inputs
-    ACTIVATED, //Currently receiving inputs
-    STOPPED    //Can no longer be activated
+    CLIENT_STATUS_CREATED,   //Is ready to be activated
+    CLIENT_STATUS_ENABLED,   //Is ready for receiving inputs
+    CLIENT_STATUS_ACTIVATED, //Currently receiving inputs
+    CLIENT_STATUS_STOPPED    //Can no longer be activated
 };
 
 struct SBarrier {
-    std::string sessionId;
-    uint        id;
-    int         x1, y1, x2, y2;
+    std::string sessionId = "";
+    uint        id        = 0;
+    int         x1        = 0;
+    int         y1        = 0;
+    int         x2        = 0;
+    int         y2        = 0;
 };
 
 class CInputCaptureResource {
@@ -27,9 +30,6 @@ class CInputCaptureResource {
     CInputCaptureResource(SP<CHyprlandInputCaptureV1> resource_, std::string handle);
     ~CInputCaptureResource();
 
-    std::string sessionId;
-
-    //
     void motion(double dx, double dy);
     void key(uint32_t key, bool pressed);
     void modifiers(uint32_t modsDepressed, uint32_t modsLatched, uint32_t modsLocked, uint32_t group);
@@ -43,21 +43,13 @@ class CInputCaptureResource {
     bool activate(double x, double y, uint32_t borderId);
     void disable();
 
-	bool enabled();
+    bool enabled();
     bool good();
 
+    //
+    std::string m_sessionId;
+
   private:
-    SP<CHyprlandInputCaptureV1>           m_resource;
-	UP<CEmulatedInputServer> eis;
-
-    //
-    uint32_t             capabilities = 0;
-
-    uint32_t             activationId = 0;
-    eClientStatus        status       = eClientStatus::CREATED;
-    SP<HOOK_CALLBACK_FN> monitorCallback;
-
-    //
     void deactivate();
 
     void onEnable();
@@ -65,6 +57,14 @@ class CInputCaptureResource {
     void onDisable();
     void onRelease(uint32_t activationId, double x, double y);
     void onClearBarriers();
+
+    //
+    SP<CHyprlandInputCaptureV1> m_resource;
+    UP<CEis>                    m_eis;
+
+    uint32_t                    m_activationId = 0;
+    eClientStatus               m_status       = eClientStatus::CLIENT_STATUS_CREATED;
+    SP<HOOK_CALLBACK_FN>        m_monitorCallback;
 };
 
 class CInputCaptureProtocol : public IWaylandProtocol {
@@ -99,9 +99,9 @@ class CInputCaptureProtocol : public IWaylandProtocol {
     std::vector<SBarrier>                           barriers;
 
     //
-    void                    onCreateSession(CHyprlandInputCaptureManagerV1* pMgr, uint32_t id, std::string handle);
-    std::optional<SBarrier> isColliding(double px, double py, double nx, double ny);
-	std::optional<SP<CInputCaptureResource>> getSession(std::string sessionId);
+    void                                     onCreateSession(CHyprlandInputCaptureManagerV1* pMgr, uint32_t id, std::string handle);
+    std::optional<SBarrier>                  isColliding(double px, double py, double nx, double ny);
+    std::optional<SP<CInputCaptureResource>> getSession(std::string sessionId);
 };
 
 namespace PROTO {

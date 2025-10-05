@@ -1,4 +1,5 @@
 #include "Eis.hpp"
+
 #include "Compositor.hpp"
 #include "devices/IKeyboard.hpp"
 #include "helpers/Monitor.hpp"
@@ -11,7 +12,7 @@
 #include <unistd.h>
 #include <wayland-server-core.h>
 
-CEmulatedInputServer::CEmulatedInputServer(std::string socketName) {
+CEis::CEis(std::string socketName) {
     Debug::log(LOG, "[EIS] Init socket: {}", socketName);
 
     const char* xdg = getenv("XDG_RUNTIME_DIR");
@@ -23,30 +24,30 @@ CEmulatedInputServer::CEmulatedInputServer(std::string socketName) {
         return;
     }
 
-    eisCtx = eis_new(nullptr);
+    m_eisCtx = eis_new(nullptr);
 
-    if (eis_setup_backend_socket(eisCtx, socketPath.c_str())) {
+    if (eis_setup_backend_socket(m_eisCtx, socketPath.c_str())) {
         Debug::log(ERR, "[EIS] Cannot init eis socket on {}", socketPath);
         return;
     }
     Debug::log(LOG, "[EIS] Listening on {}", socketPath);
 
-    eventSource = wl_event_loop_add_fd(
-        g_pCompositor->m_wlEventLoop, eis_get_fd(eisCtx), WL_EVENT_READABLE, [](int fd, uint32_t mask, void* data) { return ((CEmulatedInputServer*)data)->pollEvents(); }, this);
+    m_eventSource = wl_event_loop_add_fd(
+        g_pCompositor->m_wlEventLoop, eis_get_fd(m_eisCtx), WL_EVENT_READABLE, [](int fd, uint32_t mask, void* data) { return ((CEis*)data)->pollEvents(); }, this);
 }
 
-CEmulatedInputServer::~CEmulatedInputServer() {
-    wl_event_source_remove(eventSource);
-    Debug::log(LOG, "[EIS] Server fd {} destroyed", eis_get_fd(eisCtx));
-    eis_unref(eisCtx);
+CEis::~CEis() {
+    wl_event_source_remove(m_eventSource);
+    Debug::log(LOG, "[EIS] Server fd {} destroyed", eis_get_fd(m_eisCtx));
+    eis_unref(m_eisCtx);
 }
 
-int CEmulatedInputServer::pollEvents() {
-    eis_dispatch(eisCtx);
+int CEis::pollEvents() {
+    eis_dispatch(m_eisCtx);
 
     //Pull every available events
     while (true) {
-        eis_event* e = eis_get_event(eisCtx);
+        eis_event* e = eis_get_event(m_eisCtx);
 
         if (!e) {
             eis_event_unref(e);
@@ -62,7 +63,7 @@ int CEmulatedInputServer::pollEvents() {
     return 0;
 }
 
-int CEmulatedInputServer::onEvent(eis_event* e) {
+int CEis::onEvent(eis_event* e) {
     eis_client* eisClient = nullptr;
     eis_seat*   seat      = nullptr;
     eis_device* device    = nullptr;
@@ -78,13 +79,13 @@ int CEmulatedInputServer::onEvent(eis_event* e) {
                 return 0;
             }
 
-            if (client.handle) {
+            if (m_client.handle) {
                 Debug::log(WARN, "[EIS] Unexpected additional client {} connected to input capture session", eis_client_get_name(eisClient));
                 eis_client_disconnect(eisClient);
                 return 0;
             }
 
-            client.handle = eisClient;
+            m_client.handle = eisClient;
 
             eis_client_connect(eisClient);
             Debug::log(LOG, "[EIS] Creating new default seat");
@@ -95,17 +96,17 @@ int CEmulatedInputServer::onEvent(eis_event* e) {
             eis_seat_configure_capability(seat, EIS_DEVICE_CAP_SCROLL);
             eis_seat_configure_capability(seat, EIS_DEVICE_CAP_KEYBOARD);
             eis_seat_add(seat);
-            client.seat = seat;
+            m_client.seat = seat;
             break;
         case EIS_EVENT_CLIENT_DISCONNECT:
             eisClient = eis_event_get_client(e);
             Debug::log(LOG, "[EIS] {} disconnected", eis_client_get_name(eisClient));
             eis_client_disconnect(eisClient);
 
-            eis_seat_unref(client.seat);
+            eis_seat_unref(m_client.seat);
             clearPointer();
             clearKeyboard();
-            client.handle = nullptr;
+            m_client.handle = nullptr;
             break;
         case EIS_EVENT_SEAT_BIND:
             Debug::log(LOG, "[EIS] Binding seats...");
@@ -123,9 +124,9 @@ int CEmulatedInputServer::onEvent(eis_event* e) {
             break;
         case EIS_EVENT_DEVICE_CLOSED:
             device = eis_event_get_device(e);
-            if (device == client.pointer)
+            if (device == m_client.pointer)
                 clearPointer();
-            else if (device == client.keyboard) {
+            else if (device == m_client.keyboard) {
                 clearKeyboard();
             } else
                 Debug::log(WARN, "[EIS] Unknown device to close");
@@ -135,12 +136,12 @@ int CEmulatedInputServer::onEvent(eis_event* e) {
     return 0;
 }
 
-void CEmulatedInputServer::ensurePointer() {
-    if (client.pointer)
+void CEis::ensurePointer() {
+    if (m_client.pointer)
         return;
 
     Debug::log(LOG, "[EIS] Creating pointer");
-    eis_device* pointer = eis_seat_new_device(client.seat);
+    eis_device* pointer = eis_seat_new_device(m_client.seat);
     eis_device_configure_name(pointer, "captured relative pointer");
     eis_device_configure_capability(pointer, EIS_DEVICE_CAP_POINTER);
     eis_device_configure_capability(pointer, EIS_DEVICE_CAP_BUTTON);
@@ -159,15 +160,15 @@ void CEmulatedInputServer::ensurePointer() {
     eis_device_add(pointer);
     eis_device_resume(pointer);
 
-    client.pointer = pointer;
+    m_client.pointer = pointer;
 }
 
-void CEmulatedInputServer::ensureKeyboard() {
-    if (client.keyboard)
+void CEis::ensureKeyboard() {
+    if (m_client.keyboard)
         return;
 
     Debug::log(LOG, "[EIS] Creating keyboard");
-    eis_device* keyboard = eis_seat_new_device(client.seat);
+    eis_device* keyboard = eis_seat_new_device(m_client.seat);
     eis_device_configure_name(keyboard, "captured keyboard");
     eis_device_configure_capability(keyboard, EIS_DEVICE_CAP_KEYBOARD);
 
@@ -186,10 +187,10 @@ void CEmulatedInputServer::ensureKeyboard() {
     eis_device_add(keyboard);
     eis_device_resume(keyboard);
 
-    client.keyboard = keyboard;
+    m_client.keyboard = keyboard;
 }
 
-SKeymap CEmulatedInputServer::getKeymap() {
+SKeymap CEis::getKeymap() {
     SKeymap       _keymap = {.fd = -1, .size = -1};
 
     SP<IKeyboard> keyboard = g_pSeatManager->m_keyboard.lock();
@@ -203,113 +204,113 @@ SKeymap CEmulatedInputServer::getKeymap() {
     return _keymap;
 }
 
-void CEmulatedInputServer::clearPointer() {
-    if (!client.pointer)
+void CEis::clearPointer() {
+    if (!m_client.pointer)
         return;
     Debug::log(LOG, "[EIS] Clearing pointer");
 
-    eis_device_remove(client.pointer);
-    eis_device_unref(client.pointer);
-    client.pointer = nullptr;
+    eis_device_remove(m_client.pointer);
+    eis_device_unref(m_client.pointer);
+    m_client.pointer = nullptr;
 }
 
-void CEmulatedInputServer::clearKeyboard() {
-    if (!client.keyboard)
+void CEis::clearKeyboard() {
+    if (!m_client.keyboard)
         return;
     Debug::log(LOG, "[EIS] Clearing keyboard");
 
-    eis_device_remove(client.keyboard);
-    eis_device_unref(client.keyboard);
-    client.keyboard = nullptr;
+    eis_device_remove(m_client.keyboard);
+    eis_device_unref(m_client.keyboard);
+    m_client.keyboard = nullptr;
 }
 
-int CEmulatedInputServer::getFileDescriptor() {
-    return eis_backend_fd_add_client(eisCtx);
+int CEis::getFileDescriptor() {
+    return eis_backend_fd_add_client(m_eisCtx);
 }
 
-void CEmulatedInputServer::startEmulating(int sequence) {
+void CEis::startEmulating(int sequence) {
     Debug::log(LOG, "[EIS] Start Emulating");
 
-    if (client.pointer)
-        eis_device_start_emulating(client.pointer, sequence);
+    if (m_client.pointer)
+        eis_device_start_emulating(m_client.pointer, sequence);
 
-    if (client.keyboard)
-        eis_device_start_emulating(client.keyboard, sequence);
+    if (m_client.keyboard)
+        eis_device_start_emulating(m_client.keyboard, sequence);
 }
 
-void CEmulatedInputServer::stopEmulating() {
+void CEis::stopEmulating() {
     Debug::log(LOG, "[EIS] Stop Emulating");
 
-    if (client.pointer)
-        eis_device_stop_emulating(client.pointer);
+    if (m_client.pointer)
+        eis_device_stop_emulating(m_client.pointer);
 
-    if (client.keyboard)
-        eis_device_stop_emulating(client.keyboard);
+    if (m_client.keyboard)
+        eis_device_stop_emulating(m_client.keyboard);
 }
 
-void CEmulatedInputServer::resetKeyboard() {
-    if (!client.keyboard) //We don't re-create the keyboard if it doesn't exist
+void CEis::resetKeyboard() {
+    if (!m_client.keyboard) //We don't re-create the keyboard if it doesn't exist
         return;
     clearKeyboard();
     ensureKeyboard();
 }
 
-void CEmulatedInputServer::resetPointer() {
-    if (!client.pointer) //We don't re-create the pointer if it doesn't exist
+void CEis::resetPointer() {
+    if (!m_client.pointer) //We don't re-create the pointer if it doesn't exist
         return;
     clearPointer();
     ensurePointer();
 }
 
-void CEmulatedInputServer::sendMotion(double x, double y) {
-    if (!client.pointer)
+void CEis::sendMotion(double x, double y) {
+    if (!m_client.pointer)
         return;
-    eis_device_pointer_motion(client.pointer, x, y);
+    eis_device_pointer_motion(m_client.pointer, x, y);
 }
 
-void CEmulatedInputServer::sendKey(uint32_t key, bool pressed) {
-    if (!client.keyboard)
+void CEis::sendKey(uint32_t key, bool pressed) {
+    if (!m_client.keyboard)
         return;
-    uint64_t now = eis_now(eisCtx);
-    eis_device_keyboard_key(client.keyboard, key, pressed);
-    eis_device_frame(client.keyboard, now);
+    uint64_t now = eis_now(m_eisCtx);
+    eis_device_keyboard_key(m_client.keyboard, key, pressed);
+    eis_device_frame(m_client.keyboard, now);
 }
 
-void CEmulatedInputServer::sendModifiers(uint32_t modsDepressed, uint32_t modsLatched, uint32_t modsLocked, uint32_t group) {
-    if (!client.keyboard)
+void CEis::sendModifiers(uint32_t modsDepressed, uint32_t modsLatched, uint32_t modsLocked, uint32_t group) {
+    if (!m_client.keyboard)
         return;
-    uint64_t now = eis_now(eisCtx);
-    eis_device_keyboard_send_xkb_modifiers(client.keyboard, modsDepressed, modsLatched, modsLocked, group);
-    eis_device_frame(client.keyboard, now);
+    uint64_t now = eis_now(m_eisCtx);
+    eis_device_keyboard_send_xkb_modifiers(m_client.keyboard, modsDepressed, modsLatched, modsLocked, group);
+    eis_device_frame(m_client.keyboard, now);
 }
 
-void CEmulatedInputServer::sendButton(uint32_t button, bool pressed) {
-    if (!client.pointer)
+void CEis::sendButton(uint32_t button, bool pressed) {
+    if (!m_client.pointer)
         return;
-    eis_device_button_button(client.pointer, button, pressed);
+    eis_device_button_button(m_client.pointer, button, pressed);
 }
 
-void CEmulatedInputServer::sendScrollDiscrete(int32_t x, int32_t y) {
-    if (!client.pointer)
+void CEis::sendScrollDiscrete(int32_t x, int32_t y) {
+    if (!m_client.pointer)
         return;
-    eis_device_scroll_discrete(client.pointer, x, y);
+    eis_device_scroll_discrete(m_client.pointer, x, y);
 }
 
-void CEmulatedInputServer::sendScrollDelta(double x, double y) {
-    if (!client.pointer)
+void CEis::sendScrollDelta(double x, double y) {
+    if (!m_client.pointer)
         return;
-    eis_device_scroll_delta(client.pointer, x, y);
+    eis_device_scroll_delta(m_client.pointer, x, y);
 }
 
-void CEmulatedInputServer::sendScrollStop(bool x, bool y) {
-    if (!client.pointer)
+void CEis::sendScrollStop(bool x, bool y) {
+    if (!m_client.pointer)
         return;
-    eis_device_scroll_stop(client.pointer, x, y);
+    eis_device_scroll_stop(m_client.pointer, x, y);
 }
 
-void CEmulatedInputServer::sendPointerFrame() {
-    if (!client.pointer)
+void CEis::sendPointerFrame() {
+    if (!m_client.pointer)
         return;
-    uint64_t now = eis_now(eisCtx);
-    eis_device_frame(client.pointer, now);
+    uint64_t now = eis_now(m_eisCtx);
+    eis_device_frame(m_client.pointer, now);
 }
