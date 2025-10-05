@@ -7,7 +7,7 @@ wayland_protos = dependency(
 
 hyprland_protos = dependency(
 	'hyprland-protocols',
-	version: '>=0.6.4',
+	version: '>=0.7.0',
 	fallback: 'hyprland-protocols',
 )
 
