@@ -34,6 +34,7 @@ class CHyprBorderDecoration : public IHyprWindowDecoration {
     CBox         m_assignedGeometry = {0};
 
     int          m_lastBorderSize = -1;
+    SBoxExtents  m_lastExtents;
 
     CBox         assignedBoxGlobal();
     bool         doesntWantBorders();

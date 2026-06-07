@@ -10,13 +10,21 @@ using namespace Render::GL;
 void CGLElementRenderer::draw(WP<CBorderPassElement> element, const CRegion& damage) {
     const auto& m_data = element->m_data;
     if (m_data.hasGrad2)
-        g_pHyprOpenGL->renderBorder(
-            m_data.box, m_data.grad1, m_data.grad2, m_data.lerp,
-            {.round = m_data.round, .roundingPower = m_data.roundingPower, .borderSize = m_data.borderSize, .a = m_data.a, .outerRound = m_data.outerRound});
+        g_pHyprOpenGL->renderBorder(m_data.box, m_data.grad1, m_data.grad2, m_data.lerp,
+                                    {.round                = m_data.round,
+                                     .roundingPower        = m_data.roundingPower,
+                                     .borderSize           = m_data.borderSize,
+                                     .a                    = m_data.a,
+                                     .outerRound           = m_data.outerRound,
+                                     .hiddenBorderSegments = m_data.hiddenBorderSegments});
     else
-        g_pHyprOpenGL->renderBorder(
-            m_data.box, m_data.grad1,
-            {.round = m_data.round, .roundingPower = m_data.roundingPower, .borderSize = m_data.borderSize, .a = m_data.a, .outerRound = m_data.outerRound});
+        g_pHyprOpenGL->renderBorder(m_data.box, m_data.grad1,
+                                    {.round                = m_data.round,
+                                     .roundingPower        = m_data.roundingPower,
+                                     .borderSize           = m_data.borderSize,
+                                     .a                    = m_data.a,
+                                     .outerRound           = m_data.outerRound,
+                                     .hiddenBorderSegments = m_data.hiddenBorderSegments});
 };
 
 void CGLElementRenderer::draw(WP<CClearPassElement> element, const CRegion& damage) {

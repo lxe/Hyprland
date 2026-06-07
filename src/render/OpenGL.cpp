@@ -5,6 +5,7 @@
 #include <hyprutils/memory/UniquePtr.hpp>
 #include <hyprutils/string/String.hpp>
 #include <hyprutils/path/Path.hpp>
+#include <cmath>
 #include <numbers>
 #include <random>
 #include <pango/pangocairo.h>
@@ -63,6 +64,26 @@ using namespace NColorManagement;
 using namespace Desktop::View;
 using namespace Render;
 using namespace Render::GL;
+
+static std::vector<float> hiddenBorderSegmentsToShaderData(const std::vector<CBox>& hiddenSegments, size_t count) {
+    std::vector<float> segments;
+    segments.reserve(count * 4);
+
+    for (size_t i = 0; i < count; ++i) {
+        auto       segment        = hiddenSegments[i];
+        const bool NEGATIVEWIDTH  = segment.w < 0;
+        const bool NEGATIVEHEIGHT = segment.h < 0;
+        segment.w                 = std::abs(segment.w);
+        segment.h                 = std::abs(segment.h);
+        g_pHyprRenderer->m_renderData.renderModif.applyToBox(segment);
+        segments.emplace_back(segment.x);
+        segments.emplace_back(segment.y);
+        segments.emplace_back(NEGATIVEWIDTH ? -segment.w : segment.w);
+        segments.emplace_back(NEGATIVEHEIGHT ? -segment.h : segment.h);
+    }
+
+    return segments;
+}
 
 static inline void loadGLProc(void* pProc, const char* name) {
     void* proc = rc<void*>(eglGetProcAddress(name));
@@ -2188,6 +2209,10 @@ void CHyprOpenGLImpl::renderBorder(const CBox& box, const Config::CGradientValue
     shader->setUniformFloat(SHADER_RADIUS_OUTER, data.outerRound == -1 ? round : data.outerRound);
     shader->setUniformFloat(SHADER_ROUNDING_POWER, data.roundingPower);
     shader->setUniformFloat(SHADER_THICK, scaledBorderSize);
+    const auto HIDDENSEGMENTCOUNT = std::min<size_t>(data.hiddenBorderSegments.size(), 32);
+    shader->setUniformInt(SHADER_HIDDEN_SEGMENT_COUNT, sc<int>(HIDDENSEGMENTCOUNT));
+    if (HIDDENSEGMENTCOUNT > 0)
+        shader->setUniform4fv(SHADER_HIDDEN_SEGMENTS, HIDDENSEGMENTCOUNT, hiddenBorderSegmentsToShaderData(data.hiddenBorderSegments, HIDDENSEGMENTCOUNT));
 
     glBindVertexArray(shader->getUniformLocation(SHADER_SHADER_VAO));
 
@@ -2277,6 +2302,10 @@ void CHyprOpenGLImpl::renderBorder(const CBox& box, const Config::CGradientValue
     shader->setUniformFloat(SHADER_RADIUS_OUTER, data.outerRound == -1 ? round : data.outerRound);
     shader->setUniformFloat(SHADER_ROUNDING_POWER, data.roundingPower);
     shader->setUniformFloat(SHADER_THICK, scaledBorderSize);
+    const auto HIDDENSEGMENTCOUNT = std::min<size_t>(data.hiddenBorderSegments.size(), 32);
+    shader->setUniformInt(SHADER_HIDDEN_SEGMENT_COUNT, sc<int>(HIDDENSEGMENTCOUNT));
+    if (HIDDENSEGMENTCOUNT > 0)
+        shader->setUniform4fv(SHADER_HIDDEN_SEGMENTS, HIDDENSEGMENTCOUNT, hiddenBorderSegmentsToShaderData(data.hiddenBorderSegments, HIDDENSEGMENTCOUNT));
 
     glBindVertexArray(shader->getUniformLocation(SHADER_SHADER_VAO));
 

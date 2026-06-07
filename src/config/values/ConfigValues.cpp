@@ -166,6 +166,8 @@ std::vector<SP<IValue>> Values::getConfigValues() {
          */
 
         MS<Int>("general:border_size", "size of the border around windows", 1, {.min = 0, .max = 20, .refresh = Supplementary::REFRESH_WINDOW_STATES}),
+        MS<Bool>("general:border_collapse", "collapse adjacent no-gap tiled window borders into a single shared border", false,
+                 {.refresh = Supplementary::REFRESH_WINDOW_STATES | Supplementary::REFRESH_LAYOUTS}),
         MS<CssGap>("general:gaps_in", "gaps between windows", 5, {.refresh = Supplementary::REFRESH_LAYOUTS}),
         MS<CssGap>("general:gaps_out", "gaps between windows and monitor edges", 20, {.refresh = Supplementary::REFRESH_LAYOUTS}),
         MS<CssGap>("general:float_gaps", "gaps between windows and monitor edges for floating windows", 0, {.refresh = Supplementary::REFRESH_LAYOUTS}),
