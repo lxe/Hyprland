@@ -12,8 +12,6 @@ uniform mat3  targetPrimariesXYZ;
 uniform vec2  fullSizeUntransformed;
 uniform float radiusOuter;
 uniform float thick;
-uniform int   hiddenSegmentCount;
-uniform vec4  hiddenSegments[32];
 
 // Gradients are in OkLabA!!!! {l, a, b, alpha}
 uniform vec4  gradient[10];
@@ -45,7 +43,7 @@ void main() {
     fragColor =
 #endif
         getBorder(v_texcoord, alpha, fullSizeUntransformed, radiusOuter, thick, radius, roundingPower, topLeft, fullSize, gradientLength, gradient, angle, gradient2Length,
-                  gradient2, angle2, gradientLerp, hiddenSegmentCount, hiddenSegments
+                  gradient2, angle2, gradientLerp
 #if USE_CM
                   ,
                   sourceTF, targetTF, convertMatrix, srcTFRange, dstTFRange

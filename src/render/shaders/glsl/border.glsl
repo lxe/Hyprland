@@ -93,8 +93,7 @@ vec4[2]
 vec4
 #endif
     getBorder(vec2 v_texcoord, float alpha, vec2 fullSizeUntransformed, float radiusOuter, float thick, float radius, float roundingPower, vec2 topLeft, vec2 fullSize,
-              int gradientLength, vec4 gradient[10], float angle, int gradient2Length, vec4 gradient2[10], float angle2, float gradientLerp, int hiddenSegmentCount,
-              vec4 hiddenSegments[32]
+              int gradientLength, vec4 gradient[10], float angle, int gradient2Length, vec4 gradient2[10], float angle2, float gradientLerp
 #if USE_CM
               ,
               int sourceTF, int targetTF, mat3 convertMatrix, vec2 srcTFRange, vec2 dstTFRange
@@ -126,27 +125,6 @@ vec4
     vec4  pixColor = vec4(1.0, 1.0, 1.0, 1.0);
 
     bool  done = false;
-
-    float distanceT = originalPixCoord[1];
-    float distanceB = fullSizeUntransformed[1] - originalPixCoord[1];
-    float distanceL = originalPixCoord[0];
-    float distanceR = fullSizeUntransformed[0] - originalPixCoord[0];
-
-    for (int i = 0; i < 32; ++i) {
-        if (i >= hiddenSegmentCount)
-            break;
-
-        vec4 segment     = hiddenSegments[i];
-        vec2 segmentSize = abs(segment.zw);
-        vec2 segmentPos  = segment.xy;
-        bool insideSegment =
-            pixCoord.x >= segmentPos.x && pixCoord.x < segmentPos.x + segmentSize.x && pixCoord.y >= segmentPos.y && pixCoord.y < segmentPos.y + segmentSize.y;
-
-        if (!insideSegment)
-            continue;
-
-        discard;
-    }
 
     pixCoord -= topLeft + fullSize * 0.5;
     pixCoord *= vec2(lessThan(pixCoord, vec2(0.0))) * -2.0 + 1.0;
@@ -184,6 +162,11 @@ vec4
     // now check for other shit
     if (!done) {
         // distance to all straight bb borders
+        float distanceT = originalPixCoord[1];
+        float distanceB = fullSizeUntransformed[1] - originalPixCoord[1];
+        float distanceL = originalPixCoord[0];
+        float distanceR = fullSizeUntransformed[0] - originalPixCoord[0];
+
         // get the smallest
         float smallest = min(min(distanceT, distanceB), min(distanceL, distanceR));
 

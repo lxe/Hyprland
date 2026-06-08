@@ -40,6 +40,7 @@
 #include "pass/RectPassElement.hpp"
 #include "pass/RendererHintsPassElement.hpp"
 #include "pass/SurfacePassElement.hpp"
+#include "decorations/CollapsedBorderGraph.hpp"
 #include "../debug/log/Logger.hpp"
 #include "../protocols/ColorManagement.hpp"
 #include "../protocols/types/ContentType.hpp"
@@ -324,6 +325,84 @@ bool IHyprRenderer::shouldRenderMonitor(PHLMONITOR monitor) {
     return true;
 }
 
+static bool collapsedBordersEnabled() {
+    static auto PBORDERCOLLAPSE = CConfigValue<Config::INTEGER>("general:border_collapse");
+    return *PBORDERCOLLAPSE;
+}
+
+static bool windowBelongsToCollapsedBorderGraph(PHLWINDOW pWindow, PHLMONITOR pMonitor, PHLWORKSPACE pWorkspace) {
+    if (!validMapped(pWindow) || pWindow->isHidden())
+        return false;
+
+    if (pWindow->m_workspace != pWorkspace || pWindow->m_monitor.lock() != pMonitor)
+        return false;
+
+    if (pWindow->m_isFloating || pWindow->m_fullscreenState.internal != FSMODE_NONE)
+        return false;
+
+    if (!pWindow->layoutTarget() || pWindow->rounding() != 0)
+        return false;
+
+    return !pWindow->m_X11DoesntWantBorders && pWindow->getRealBorderSize() > 0 && pWindow->m_ruleApplicator->decorate().valueOrDefault();
+}
+
+static CBox scaledCollapsedBorderBox(PHLWINDOW pWindow, PHLMONITOR pMonitor) {
+    CBox box = pWindow->layoutTarget()->position();
+    box.translate(-pMonitor->m_position).scale(pMonitor->m_scale).round();
+    return box;
+}
+
+static CHyprColor collapsedBorderGraphColor(PHLWINDOW pWindow, const float alpha) {
+    const auto& gradient = pWindow->m_realBorderColor;
+    const auto  color    = gradient.m_colors.empty() ? Colors::WHITE : gradient.m_colors.front();
+    return color.modifyA(color.a * alpha);
+}
+
+static void renderCollapsedBorderGraph(PHLMONITOR pMonitor, PHLWORKSPACE pWorkspace) {
+    if (!collapsedBordersEnabled())
+        return;
+
+    std::vector<CBox> boxes;
+    boxes.reserve(g_pCompositor->m_windows.size());
+
+    PHLWINDOW  styleWindow;
+
+    const auto FOCUSED = Desktop::focusState()->window();
+    if (FOCUSED && windowBelongsToCollapsedBorderGraph(FOCUSED, pMonitor, pWorkspace))
+        styleWindow = FOCUSED;
+
+    for (const auto& w : g_pCompositor->m_windows) {
+        if (!windowBelongsToCollapsedBorderGraph(w, pMonitor, pWorkspace))
+            continue;
+
+        const auto BOX = scaledCollapsedBorderBox(w, pMonitor);
+
+        if (BOX.width < 1 || BOX.height < 1)
+            continue;
+
+        boxes.emplace_back(BOX);
+
+        if (!styleWindow)
+            styleWindow = w;
+    }
+
+    if (!styleWindow || boxes.empty())
+        return;
+
+    const auto BORDERPX = sc<int>(std::round(styleWindow->getRealBorderSize() * pMonitor->m_scale));
+
+    if (BORDERPX <= 0)
+        return;
+
+    const auto GRAPH = Render::buildCollapsedBorderGraph(boxes, BORDERPX);
+    const auto COLOR = collapsedBorderGraphColor(styleWindow, pWorkspace->m_alpha->value());
+
+    GRAPH.region.forEachRect([&](const auto& rect) {
+        const CBox box = {rect.x1, rect.y1, rect.x2 - rect.x1, rect.y2 - rect.y1};
+        g_pHyprRenderer->addPassElement(makeUnique<CRectPassElement>(CRectPassElement::SRectData{.box = box, .color = COLOR}));
+    });
+}
+
 void IHyprRenderer::renderWorkspaceWindowsFullscreen(PHLMONITOR pMonitor, PHLWORKSPACE pWorkspace, const Time::steady_tp& time) {
     PHLWINDOW pWorkspaceWindow = nullptr;
 
@@ -486,6 +565,8 @@ void IHyprRenderer::renderWorkspaceWindows(PHLMONITOR pMonitor, PHLWORKSPACE pWo
     for (auto& w : tiledFadingOut) {
         renderWindow(w.lock(), pMonitor, time, true, RENDER_PASS_MAIN);
     }
+
+    renderCollapsedBorderGraph(pMonitor, pWorkspace);
 
     // Non-floating popup
     for (auto& w : windows) {

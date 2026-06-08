@@ -13,7 +13,6 @@
 #include <string>
 #include <stack>
 #include <map>
-#include <vector>
 
 #include <cairo/cairo.h>
 
@@ -191,12 +190,11 @@ namespace Render::GL {
         };
 
         struct SBorderRenderData {
-            int               round         = 0;
-            float             roundingPower = 2.F;
-            int               borderSize    = 1;
-            float             a             = 1.0;
-            int               outerRound    = -1; /* use round */
-            std::vector<CBox> hiddenBorderSegments;
+            int   round         = 0;
+            float roundingPower = 2.F;
+            int   borderSize    = 1;
+            float a             = 1.0;
+            int   outerRound    = -1; /* use round */
         };
 
         void                           makeEGLCurrent();

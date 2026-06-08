@@ -187,8 +187,6 @@ void CShader::getUniformLocations() {
     m_uniformLocations[SHADER_RADIUS_OUTER]              = getUniform("radiusOuter");
     m_uniformLocations[SHADER_ROUNDING_POWER]            = getUniform("roundingPower");
     m_uniformLocations[SHADER_THICK]                     = getUniform("thick");
-    m_uniformLocations[SHADER_HIDDEN_SEGMENT_COUNT]      = getUniform("hiddenSegmentCount");
-    m_uniformLocations[SHADER_HIDDEN_SEGMENTS]           = getUniform("hiddenSegments");
     m_uniformLocations[SHADER_HALFPIXEL]                 = getUniform("halfpixel");
     m_uniformLocations[SHADER_RANGE]                     = getUniform("range");
     m_uniformLocations[SHADER_SHADOW_POWER]              = getUniform("shadowPower");
